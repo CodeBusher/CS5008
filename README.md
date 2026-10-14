@@ -170,4 +170,19 @@ Stopping a Codespace stops compute usage, although storage usage may continue.
 
 If you run into issues with Git, Codespaces, GCC, or the lab exercises, feel free to ask during the session.
 
+**Questions and feedback are welcome!** If an instruction or example is unclear, something isn't working, or you have a question, please [open an issue in the TA's repository](https://github.com/CodeBusher/CS5008/issues). You don't need to know the solution to ask and your question can help other students too.
+
+Before opening an issue, check whether someone has already asked the same question. Give your issue a descriptive title and include the relevant file or lab, what you tried, and any error messages.
+
+## Contribute Improvements
+
+Found a typo, a bug, or a clearer way to explain something? **Students are welcome to open pull requests (PRs).** You can propose changes from your own fork, and the TA can review and merge them.
+
+1. Create a new branch in your fork for the improvement, keeping your `main` branch ready for TA updates.
+2. Make your changes, then commit and push that branch to your fork. Changes to `README.md` and `demo/` are welcome on this contribution branch.
+3. On GitHub, [open a pull request](https://github.com/CodeBusher/CS5008/compare) with `CodeBusher/CS5008` and `main` as the base repository and branch, and your fork and contribution branch as the head. Use **compare across forks** if needed.
+4. Explain what you changed and why, and link any related issue.
+
+Opening a PR proposes a change; it does not automatically change the TA's repository. For more details, see [GitHub's guide to creating a pull request from a fork](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/creating-a-pull-request-from-a-fork).
+
 Happy coding!

@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab 9 — Pratt Parsing</title>
+<style>
+  :root {
+    --bg: #1e1e2e; --panel: #181825; --panel2: #313244; --border: #45475a;
+    --text: #cdd6f4; --muted: #8a8fa8; --accent: #89b4fa; --green: #a6e3a1;
+    --red: #f38ba8; --yellow: #f9e2af; --mauve: #cba6f7; --peach: #fab387; --teal: #94e2d5;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+  }
+  :root[data-theme="light"] {
+    --bg: #eff1f5; --panel: #e6e9ef; --panel2: #dce0e8; --border: #bcc0cc;
+    --text: #4c4f69; --muted: #6c6f85; --accent: #1e66f5; --green: #40a02b;
+    --red: #d20f39; --yellow: #df8e1d; --mauve: #8839ef; --peach: #fe640b; --teal: #179299;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans);
+         font-size: calc(clamp(16px, 1.55vw, 32px) * var(--zoom, 1)); line-height: 1.45; overflow: hidden; }
+  code, pre, .mono { font-family: var(--mono); }
+  code { background: var(--panel2); padding: 0.05em 0.35em; border-radius: 4px; font-size: 0.92em; }
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+        padding: 0.8em 1em; font-size: 0.85em; line-height: 1.5; overflow: auto; }
+  pre code { background: none; padding: 0; }
+  a { color: var(--accent); }
+  b.yes { color: var(--green); } b.no { color: var(--red); }
+  .muted { color: var(--muted); }
+  .c-next { color: var(--red); font-weight: 700; }
+  .c-peek { color: var(--yellow); font-weight: 700; }
+  .c-adv { color: var(--green); font-weight: 700; }
+  .c-note { color: var(--muted); font-style: italic; }
+  .vs pre { font-size: 0.82em; }
+  .vs .flip-new { display: inline-block; animation: flipIn .45s ease-out; }
+  @keyframes flipIn { from { transform: rotateX(90deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  .vs .click-me { border-radius: 4px; outline: 2px dashed var(--red); outline-offset: 2px; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { outline-color: transparent; } }
+  .vs .gap { background: color-mix(in srgb, var(--red) 12%, transparent); display: inline-block; width: 100%; }
+  .vs .add { background: color-mix(in srgb, var(--green) 14%, transparent); display: inline-block; width: 100%; }
+  .kw { color: var(--mauve); } .num { color: var(--peach); } .cm { color: var(--muted); } .fn { color: var(--accent); }
+
+  /* ---------- slide frame ---------- */
+  .slide { position: absolute; inset: 0 0 44px 0; padding: 2.2vh 3.5vw 1.5vh; display: none;
+           flex-direction: column; gap: 1.6vh; overflow: auto; }
+  .slide.active { display: flex; }
+  .slide h1 { font-size: 2.6em; line-height: 1.1; }
+  .slide h2 { font-size: 1.7em; color: var(--accent); }
+  .slide h2 .tag { font-size: 0.55em; color: var(--muted); font-weight: 500; margin-left: 0.6em; vertical-align: middle; }
+  .slide h3 { font-size: 1.05em; color: var(--mauve); margin-bottom: 0.4em; }
+  .slide ul, .slide ol { padding-left: 1.3em; } .slide li { margin: 0.3em 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5vw; align-items: start; }
+  .cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5vw; align-items: start; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.8em 1em; }
+  .callout { border-left: 4px solid var(--yellow); background: var(--panel); padding: 0.6em 1em; border-radius: 0 8px 8px 0; }
+  .big-q { font-size: 1.25em; }
+  table.t { border-collapse: collapse; font-size: 0.92em; }
+  table.t th, table.t td { border: 1px solid var(--border); padding: 0.35em 0.8em; text-align: left; }
+  table.t th { background: var(--panel2); }
+
+  #footer { position: fixed; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center;
+            gap: 12px; padding: 0 16px; background: var(--panel); border-top: 1px solid var(--border);
+            font-size: 15px; color: var(--muted); }
+  #footer .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #progress { position: fixed; left: 0; bottom: 44px; height: 3px; background: var(--accent); transition: width .2s; }
+  button, select, input[type=text] { font: inherit; font-size: 0.85em; color: var(--text); background: var(--panel2);
+            border: 1px solid var(--border); border-radius: 6px; padding: 0.25em 0.7em; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+  #footer button { font-size: 13px; padding: 3px 10px; }
+  kbd { font-family: var(--mono); font-size: 0.85em; border: 1px solid var(--border); border-bottom-width: 2px;
+        border-radius: 4px; padding: 0 0.35em; background: var(--panel2); }
+
+  /* ---------- title slide ---------- */
+  .title-slide { justify-content: center; }
+  .title-slide .sub { font-size: 1.3em; color: var(--muted); }
+  .pipe { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5em; font-family: var(--mono); margin-top: 1em; }
+  .pipe .st { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.4em 0.8em; }
+  .pipe .st.on { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .pipe .ar { color: var(--muted); }
+
+  /* ---------- controls ---------- */
+  .controls { display: flex; flex-wrap: wrap; gap: 0.5em 0.8em; align-items: center; }
+  .controls label { font-size: 0.85em; display: inline-flex; gap: 0.3em; align-items: center; cursor: pointer; }
+  .controls input[type=text] { width: 17em; font-family: var(--mono); }
+  .controls .sep { width: 1px; height: 1.4em; background: var(--border); }
+  .controls .count { font-family: var(--mono); font-size: 0.85em; color: var(--muted); min-width: 7em; }
+  .err { color: var(--red); font-family: var(--mono); font-size: 0.9em; }
+
+  /* ---------- tokens ---------- */
+  .tokens { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: flex-end; }
+  .tok { position: relative; font-family: var(--mono); font-size: 1.15em; min-width: 1.9em; text-align: center;
+         padding: 0.15em 0.45em; border-radius: 6px; border: 2px solid var(--border); background: var(--panel); transition: all .15s; }
+  .tok .p { display: block; font-size: 0.5em; color: var(--muted); line-height: 1; }
+  .tok.op { color: var(--mauve); } .tok.n { color: var(--peach); }
+  .tok.used { opacity: 0.35; }
+  .tok.lost { opacity: 1; border-color: var(--red); color: var(--red); text-decoration: line-through; }
+  .tok.peek { border-color: var(--yellow); box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 30%, transparent); opacity: 1; }
+  .tok.peek::after { content: "peek"; position: absolute; top: -1.35em; left: 50%; transform: translateX(-50%);
+                     font-size: 0.5em; color: var(--yellow); font-family: var(--sans); }
+
+  /* ---------- parser stepper ---------- */
+  .stepper-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 0.8fr) minmax(0, 0.95fr); gap: 1vw; flex: 1; min-height: 0; }
+  .pane { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.6em 0.8em; overflow: auto; min-height: 0; }
+  .pane h3 { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.5em; }
+  .code { font-family: var(--mono); font-size: 0.78em; white-space: pre; line-height: 1.38; }
+  .code .ln { display: block; padding: 0 0.4em; border-radius: 4px; border-left: 3px solid transparent; }
+  .code .ln.on { background: color-mix(in srgb, var(--accent) 18%, transparent); border-left-color: var(--accent); color: var(--text); font-weight: 600; }
+  .code .ln.changed { color: var(--red); }
+  .frames { display: flex; flex-direction: column-reverse; gap: 0.4em; }
+  .frame { font-family: var(--mono); font-size: 0.75em; border: 1px solid var(--border); border-radius: 8px; padding: 0.35em 0.6em; background: var(--bg); }
+  .frame.top { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .frame .hd { color: var(--accent); font-weight: 600; }
+  .frame.paren .hd { color: var(--teal); }
+  .frame .row { color: var(--muted); } .frame .row span { color: var(--text); }
+  .frame .wait { color: var(--yellow); }
+  .stack-label { font-size: 0.65em; color: var(--muted); text-align: center; margin: 0.2em 0; }
+  .narr { background: var(--panel); border: 1px solid var(--border); border-left: 5px solid var(--accent);
+          border-radius: 8px; padding: 0.55em 1em; font-size: 1.05em; min-height: 3.2em; }
+  .narr.q { border-left-color: var(--yellow); }
+  .narr.e { border-left-color: var(--red); }
+  .narr.d { border-left-color: var(--green); }
+  .treebox { display: flex; justify-content: center; align-items: flex-start; }
+  .result-line { font-family: var(--mono); font-size: 0.75em; color: var(--muted); margin-top: 0.4em; word-break: break-all; }
+
+  /* ---------- tree svg ---------- */
+  svg.tree { width: 100%; height: auto; overflow: visible; }
+  svg.tree line { stroke: var(--muted); stroke-width: 2; }
+  svg.tree line.dash { stroke-dasharray: 5 4; stroke: var(--yellow); }
+  svg.tree circle { fill: var(--panel2); stroke: var(--accent); stroke-width: 2.5; }
+  svg.tree .op circle { stroke: var(--mauve); }
+  svg.tree text { fill: var(--text); font-family: var(--mono); font-size: 17px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+  svg.tree .pending circle { stroke: var(--yellow); stroke-dasharray: 5 4; fill: var(--bg); }
+  svg.tree .hole rect { fill: none; stroke: var(--yellow); stroke-dasharray: 4 3; stroke-width: 2; }
+  svg.tree .hole text { fill: var(--yellow); }
+  svg.tree .hl circle { stroke: var(--green); stroke-width: 4.5; fill: color-mix(in srgb, var(--green) 22%, var(--panel2)); }
+  svg.tree .visited circle { fill: color-mix(in srgb, var(--accent) 22%, var(--panel2)); }
+  svg.tree .cur circle { stroke: var(--green); stroke-width: 5; fill: color-mix(in srgb, var(--green) 35%, var(--panel2)); }
+  svg.tree .stmt rect { fill: var(--panel2); stroke: var(--teal); stroke-width: 2.5; }
+  svg.tree .stmt text { font-size: 15px; }
+  svg.tree .stmt.visited rect { fill: color-mix(in srgb, var(--accent) 22%, var(--panel2)); }
+  svg.tree .stmt.cur rect { stroke: var(--green); stroke-width: 5; fill: color-mix(in srgb, var(--green) 35%, var(--panel2)); }
+  svg.tree .badge { font-size: 11px; fill: var(--muted); font-weight: 500; }
+
+  /* ---------- codegen ---------- */
+  .gen-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.7fr) minmax(0, 1.15fr) minmax(0, 0.75fr); gap: 1vw; flex: 1; min-height: 0; }
+  .smlist, .asmlist { font-family: var(--mono); font-size: 0.78em; line-height: 1.55; white-space: pre; }
+  .smlist div, .asmlist div { padding: 0 0.4em; border-radius: 4px; }
+  .smlist .on, .asmlist .on { background: color-mix(in srgb, var(--green) 22%, transparent); color: var(--text); font-weight: 600; }
+  .asmlist .old { color: var(--muted); }
+  .mstack { display: flex; flex-direction: column; font-family: var(--mono); font-size: 0.8em; }
+  .mstack .cell { border: 1px solid var(--border); border-top: none; padding: 0.25em 0.5em; display: flex; justify-content: space-between; gap: 0.5em; }
+  .mstack .cell:first-child { border-top: 1px solid var(--border); }
+  .mstack .cell.sys { color: var(--muted); background: var(--bg); }
+  .mstack .cell.val { background: color-mix(in srgb, var(--peach) 14%, var(--panel)); }
+  .mstack .cell.val.new { background: color-mix(in srgb, var(--green) 30%, var(--panel)); }
+  .mstack .ptr { color: var(--yellow); font-size: 0.85em; }
+  .mstack .off { color: var(--muted); font-size: 0.8em; }
+  .regs { display: grid; grid-template-columns: auto 1fr; gap: 0.15em 0.7em; font-family: var(--mono); font-size: 0.8em; margin-top: 0.8em; }
+  .regs .r { color: var(--mauve); } .regs .chg { color: var(--green); font-weight: 700; }
+
+  /* ---------- SM → assembly cards ---------- */
+  .sm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5em, 1fr)); gap: 0.8em; }
+  .sm-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.5em 0.7em; }
+  .sm-card .sm { font-family: var(--mono); font-weight: 700; color: var(--mauve); margin-bottom: 0.3em; }
+  .sm-card pre { background: none; border: none; padding: 0; font-size: 1em; }
+  .sm-math { font-size: 1em; }
+
+  /* ---------- practice ---------- */
+  .practice { display: grid; grid-template-columns: repeat(auto-fit, minmax(15em, 1fr)); gap: 1vw; }
+  .pcard { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.7em 0.9em; display: flex; flex-direction: column; gap: 0.4em; }
+  .pcard .ex { font-family: var(--mono); font-size: 1.25em; }
+  .pcard .ans { display: none; } .pcard.show .ans { display: block; }
+  .pcard .btns { display: flex; gap: 0.4em; }
+
+  .help { position: fixed; right: 16px; bottom: 56px; background: var(--panel); border: 1px solid var(--border);
+          border-radius: 10px; padding: 0.8em 1.1em; font-size: 14px; display: none; z-index: 10; }
+  .help.show { display: block; } .help td { padding: 2px 8px; }
+</style>
+</head>
+<body>
+
+<!-- =============================== 1. TITLE =============================== -->
+<section class="slide title-slide" data-title="Title">
+  <div class="muted">CS 5008 · Lab 9 · Compiler 3</div>
+  <h1>Expressions &amp; Stack Machine IR</h1>
+  <div class="pipe">
+    <span class="st">source.jive</span><span class="ar">→ lexer →</span>
+    <span class="st">Tokens</span><span class="ar">→ <b>parser</b> →</span>
+    <span class="st on">AST</span><span class="ar">→ generate_sm →</span>
+    <span class="st on">Stack machine</span><span class="ar">→ generate_asm →</span>
+    <span class="st on">assembly</span>
+  </div>
+  <p class="muted" style="margin-top:2em; font-size:0.85em">
+    <kbd>→</kbd>/<kbd>←</kbd> step (or change slide) · <kbd>PgDn</kbd>/<kbd>PgUp</kbd> change slide ·
+    <kbd>P</kbd> predict mode · <kbd>+</kbd>/<kbd>-</kbd> font size · <kbd>T</kbd> theme · <kbd>F</kbd> fullscreen · <kbd>?</kbd> help
+  </p>
+</section>
+
+<!-- =============================== 2. PIPELINE =============================== -->
+<section class="slide" data-title="The whole pipeline">
+  <h2>The whole pipeline, on one program</h2>
+  <div class="controls">
+    <span class="mono">fn main() -&gt; int { return</span>
+    <input type="text" id="pipeExpr" value="2 + 3 * 4 - 5" data-enter="pipe">
+    <span class="mono">}</span>
+    <span id="pipeErr" class="err"></span>
+  </div>
+  <div style="display:grid; grid-template-columns: 0.9fr 1fr 0.6fr 1fr; gap:1vw; flex:1; min-height:0">
+    <div class="pane"><h3>1 · lex_file() → Token_Array</h3><pre id="pipeTok" style="border:none;padding:0;background:none"></pre></div>
+    <div class="pane"><h3>2 · parse_program() → AST</h3><pre id="pipeAst" style="border:none;padding:0;background:none"></pre></div>
+    <div class="pane"><h3>3 · generate_sm()</h3><pre id="pipeSm" style="border:none;padding:0;background:none"></pre></div>
+    <div class="pane"><h3>4 · generate_asm() → out.asm</h3><pre id="pipeAsm" style="border:none;padding:0;background:none"></pre></div>
+  </div>
+</section>
+
+
+<!-- =============================== NEXT vs PEEK/ADVANCE =============================== -->
+<section class="slide vs" data-title="Pseudocode" data-stepper="flip">
+  <h2>Pseudocode</h2>
+  <div style="align-self:center; max-width:100%">
+      <h3 id="flipTitle">Lecture</h3>
+      <pre id="flipCode" style="font-size:1.25em; cursor:pointer"></pre>
+      <p style="margin-top:0.5em"><button onclick="flipTo(false)">Lecture version</button> <button onclick="flipTo(true)">Lab version</button></p>
+  </div>
+</section>
+
+<!-- =============================== 5. PARSER STEPPER =============================== -->
+<section class="slide" data-title="Pratt parser — step through" data-stepper="parse">
+  <h2>Step through the parser <span class="tag"><kbd>→</kbd> next · <kbd>←</kbd> back · <kbd>P</kbd> predict mode</span></h2>
+  <div class="controls">
+    <select id="pSelect"></select>
+    <input type="text" id="pInput" data-enter="parse" placeholder="type any expression, Enter">
+    <span class="sep"></span>
+    <button data-act="first">⏮</button><button data-act="prev">◀</button>
+    <button class="primary" data-act="next">Next ▶</button><button data-act="last">⏭</button>
+    <span class="count" id="pCount"></span>
+    <span class="sep"></span>
+    <label><input type="checkbox" id="pPredict"> Predict mode</label>
+    <label title="tok = next_token() consumes, as written literally in the lecture"><input type="checkbox" id="pConsume"> Lecture <code class="c-next">next_token()</code></label>
+  </div>
+  <div class="tokens" id="pTokens" style="margin-top:0.6em"></div>
+  <div class="stepper-grid">
+    <div class="pane"><h3>Code</h3><div class="code" id="pCode"></div></div>
+    <div class="pane"><h3>Call stack <span style="text-transform:none">(top = running)</span></h3><div class="frames" id="pFrames"></div></div>
+    <div class="pane"><h3>Tree so far <span style="text-transform:none">(dashed = waiting for its rhs)</span></h3>
+      <div class="treebox" id="pTree"></div><div class="result-line" id="pResult"></div></div>
+  </div>
+  <div class="narr" id="pNarr"></div>
+</section>
+
+<!-- =============================== ERRORS =============================== -->
+<section class="slide" data-title="Reporting errors">
+  <h2>These must fail to compile <span class="tag">where does each one break?</span></h2>
+  <div class="practice" id="errors"></div>
+  <div class="callout">Two different failure points: <code>parse_primary</code> finds no atom (<b>foo</b>, <b>bar</b>), or the expression ends cleanly but the
+    <b>block</b> finds a token that isn't <code>}</code> or a statement (<b>baz</b>, <b>qux</b>). Pratt parsing alone accepts <code>1 + 2</code> and stops — the caller must check what comes next.</div>
+</section>
+
+<!-- =============================== SM → ASSEMBLY =============================== -->
+<section class="slide" data-title="Stack Machine → assembly">
+  <h2>Stack Machine → assembly</h2>
+  <div class="sm-grid">
+      <div class="sm-card"><div class="sm">FN name</div><pre>name:</pre></div>
+      <div class="sm-card"><div class="sm">PUSH n</div><pre>push n</pre></div>
+      <div class="sm-card"><div class="sm">ADD</div><pre>pop rcx
+pop rax
+add rax, rcx
+push rax</pre></div>
+      <div class="sm-card"><div class="sm">SUB</div><pre>pop rcx
+pop rax
+sub rax, rcx
+push rax</pre></div>
+      <div class="sm-card"><div class="sm">MUL</div><pre>pop rcx
+pop rax
+imul rcx
+push rax</pre></div>
+      <div class="sm-card"><div class="sm">DIV</div><pre>pop rcx
+pop rax
+cqo
+idiv rcx
+push <b>rax</b></pre></div>
+      <div class="sm-card"><div class="sm">MOD</div><pre>pop rcx
+pop rax
+cqo
+idiv rcx
+push <b>rdx</b></pre></div>
+      <div class="sm-card"><div class="sm">RETURN</div><pre>pop rax
+ret</pre></div>
+      <div class="sm-card"><div class="sm">END_FN</div><pre><span class="muted">(nothing)</span></pre></div>
+  </div>
+  <pre class="sm-math"><span class="kw">imul</span> rcx    rdx:rax = rax × rcx
+<span class="kw">cqo</span>         rdx:rax = sign-extend(rax)
+<span class="kw">idiv</span> rcx    rax = rdx:rax ÷ rcx      rdx = rdx:rax mod rcx</pre>
+</section>
+
+<!-- =============================== 8. CODEGEN STEPPER =============================== -->
+<section class="slide" data-title="AST → stack machine → assembly" data-stepper="gen">
+  <h2>Post-order walk → stack machine → assembly <span class="tag">left, right, then the node</span></h2>
+  <div class="controls">
+    <select id="gSelect"></select>
+    <input type="text" id="gInput" data-enter="gen" placeholder="type any expression, Enter">
+    <span class="sep"></span>
+    <button data-act="first">⏮</button><button data-act="prev">◀</button>
+    <button class="primary" data-act="next">Next ▶</button><button data-act="last">⏭</button>
+    <span class="count" id="gCount"></span>
+  </div>
+  <div class="gen-grid">
+    <div class="pane"><h3>AST (numbers = visit order)</h3><div class="treebox" id="gTree"></div></div>
+    <div class="pane"><h3>SM_Program</h3><div class="smlist" id="gSm"></div></div>
+    <div class="pane"><h3>out.asm</h3><div class="asmlist" id="gAsm"></div></div>
+    <div class="pane"><h3>Stack (grows ↓)</h3><div class="mstack" id="gStack"></div><div class="regs" id="gRegs"></div></div>
+  </div>
+  <div class="narr" id="gNarr"></div>
+</section>
+
+<!-- =============================== 10. PRACTICE =============================== -->
+<section class="slide" data-title="Practice">
+  <h2>Your turn: draw the tree, then predict <code>echo $?</code></h2>
+  <div class="practice" id="practice"></div>
+</section>
+
+
+<div id="progress"></div>
+<div id="footer">
+  <button id="prevSlide">‹ Prev</button>
+  <span id="slideNum"></span>
+  <button id="nextSlide">Next ›</button>
+  <span class="title" id="slideTitle"></span>
+  <button id="themeBtn">Theme</button>
+  <button id="helpBtn">?</button>
+</div>
+<div class="help" id="help"><table>
+  <tr><td><kbd>→</kbd> <kbd>Space</kbd></td><td>next step (next slide when done)</td></tr>
+  <tr><td><kbd>←</kbd></td><td>previous step / slide</td></tr>
+  <tr><td><kbd>PgDn</kbd> <kbd>PgUp</kbd> <kbd>]</kbd> <kbd>[</kbd></td><td>next / previous slide</td></tr>
+  <tr><td><kbd>Home</kbd> <kbd>End</kbd></td><td>first / last step</td></tr>
+  <tr><td><kbd>P</kbd></td><td>toggle predict mode (parser)</td></tr>
+  <tr><td><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd></td><td>bigger / smaller / reset font</td></tr>
+  <tr><td><kbd>T</kbd> / <kbd>F</kbd></td><td>theme / fullscreen</td></tr>
+</table></div>
+
+<script>
+// =====================================================================
+// Lexer + precedence
+// =====================================================================
+const EXAMPLES = [
+  '2 + 3 * 4 - 5',
+  '1 + 2 - 3 * 4 / 5 % 6',
+  '1 + (2 - 3) * 4 / (5 % 6)',
+  '3 +',
+  '/ 5',
+  '1 + 2)',
+  '5 * 6 * 7 8',
+];
+const BAD = [['foo', '3 +'], ['bar', '/ 5'], ['baz', '1 + 2)'], ['qux', '5 * 6 * 7 8']];
+const PREC = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2 };
+const prec = t => (t.kind === 'op' ? PREC[t.text] : -1);
+const tokText = t => t.text;
+
+function lex(src) {
+  const toks = [];
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (/[0-9]/.test(c)) {
+      let j = i; while (j < src.length && /[0-9]/.test(src[j])) j++;
+      toks.push({ kind: 'num', text: src.slice(i, j), val: parseInt(src.slice(i, j), 10) }); i = j; continue;
+    }
+    if ('+-*/%'.includes(c)) { toks.push({ kind: 'op', text: c }); i++; continue; }
+    if (c === '(') { toks.push({ kind: 'lp', text: '(' }); i++; continue; }
+    if (c === ')') { toks.push({ kind: 'rp', text: ')' }); i++; continue; }
+    return { error: `Lexer: unexpected character '${c}' at column ${i + 1}` };
+  }
+  if (!toks.length) return { error: 'Empty expression' };
+  toks.push({ kind: 'eof', text: '}' });   // in a block, the expression is followed by '}'
+  return { tokens: toks };
+}
+
+// =====================================================================
+// AST helpers
+// =====================================================================
+const HOLE = { kind: 'hole' };
+const infix = n => !n ? '?' : n.kind === 'int' ? String(n.val) : n.kind === 'hole' ? '?' :
+  `(${infix(n.lhs)} ${n.op} ${infix(n.rhs)})`;
+const labForm = n => n.kind === 'int' ? String(n.val) : `BINOP(${n.op}, ${labForm(n.lhs)}, ${labForm(n.rhs)})`;
+const showAtom = n => n.kind === 'int' ? String(n.val) : infix(n).replace(/^\((.*)\)$/, '$1');
+
+function cdiv(a, b, op) {
+  if (b === 0) throw new Error(`${op === '/' ? 'Division' : 'Modulo'} by zero — idiv raises SIGFPE`);
+  return op === '/' ? Math.trunc(a / b) : a % b;   // C/x86 semantics: truncate toward zero
+}
+function applyOp(op, a, b) {
+  switch (op) { case '+': return a + b; case '-': return a - b; case '*': return a * b; default: return cdiv(a, b, op); }
+}
+function evaluate(n) { return n.kind === 'int' ? n.val : applyOp(n.op, evaluate(n.lhs), evaluate(n.rhs)); }
+const exitCode = v => ((v % 256) + 256) % 256;
+
+// =====================================================================
+// Instrumented Pratt parser: records a snapshot per interesting line
+// =====================================================================
+function traceParse(tokens, opts = {}) {
+  const consume = !!opts.consume;
+  const steps = [], frames = [], lost = new Set();
+  let pos = 0, nid = 0, failed = false;
+
+  const snap = (lines, msg, extra = {}) =>
+    steps.push({ lines, msg, pos, frames: frames.map(f => ({ ...f })), lost: new Set(lost), ...extra });
+  const fail = (lines, msg) => { failed = true; snap(lines, `❌ ${msg}`, { error: true }); };
+
+  function parsePrimary() {
+    const tok = tokens[pos];
+    if (tok.kind === 'num') { pos++; return { id: nid++, kind: 'int', val: tok.val }; }
+    if (tok.kind === 'lp') {
+      const pf = { kind: 'paren', val: null };
+      frames.push(pf); pos++;
+      snap(['P4', 'P5'], `<code>parse_primary()</code> sees <code>(</code>: consume it and start fresh with <code>parse_expr(0)</code>.`);
+      const e = parseExpr(0);
+      if (failed) return null;
+      pf.val = e; frames[frames.length - 1].val = e;
+      if (tokens[pos].kind !== 'rp') {
+        fail(['P6'], `<code>expect(")")</code> failed: found <code>${tokText(tokens[pos])}</code>. The inner call stopped too early.`);
+        return null;
+      }
+      pos++;
+      snap(['P6', 'P7'], `<code>expect(")")</code> ✓. The whole group <code>${infix(e)}</code> comes back as <b>one atom</b>.`);
+      frames.pop();
+      return e;
+    }
+    fail(['P2', 'P4'], `Expected a number or '(' but found <code>${tokText(tok)}</code>`);
+    return null;
+  }
+
+  function parseExpr(min) {
+    const f = { kind: 'expr', min, lhs: null, tok: null, pendingOp: null };
+    frames.push(f);
+    const top = () => frames[frames.length - 1];
+    snap(['L1'], `Call <code>parse_expr(${min})</code> — this call may only take operators with precedence <b>&gt; ${min}</b>.`);
+
+    const lhs0 = parsePrimary();
+    if (failed) return null;
+    top().lhs = lhs0;
+    snap(['L2'], lhs0.kind === 'int'
+      ? `<code>parse_primary()</code> consumes <code>${lhs0.val}</code> → <code>lhs = ${lhs0.val}</code>`
+      : `<code>lhs = ${infix(lhs0)}</code> (the parenthesized group)`);
+
+    let first = true;
+    for (;;) {
+      const ti = Math.min(pos, tokens.length - 1), tok = tokens[ti];
+      if (consume) pos = Math.min(pos + 1, tokens.length);   // lecture next_token(): look AND take
+      const p = prec(tok), go = p > min;
+      if (consume && !go) lost.add(ti);
+      top().tok = tok;
+      let why = '';
+      if (!go) {
+        if (p === -1) why = ' Not an operator — nothing more for this call.';
+        else if (p === min) why = ' <b>Equal</b> precedence stops here; an outer loop will take it ⇒ left-associativity.';
+        else why = ' Weaker operator: return, and let a caller with a smaller gate take it.';
+      } else if (p > 1 && min > 0) why = ' A stronger operator grabs the operand first.';
+      if (consume && !go) why += ` ⚠️ But <code class="c-next">next_token()</code> already <b>consumed</b> <code>${tok.text}</code> — it's gone!`;
+      snap(first ? ['L3', 'L4'] : ['L8', 'L4'],
+        `${consume ? '<code class="c-next">next_token()</code>' : '<code class="c-peek">peek</code>'} → <code>${tokText(tok)}</code>${p >= 0 ? ` (prec ${p})` : ' (prec -1)'}. Is ${p} &gt; ${min}? ` +
+        (go ? '<b class="yes">YES → enter loop</b>.' : '<b class="no">NO → exit loop</b>.') + why,
+        { question: `peek → <code>${tokText(tok)}</code>. Is prec = ${p} &gt; min_prec = ${min}? Does this call take it?` });
+      first = false;
+      if (!go) break;
+
+      if (!consume) pos++;
+      const next = p;
+      top().pendingOp = tok.text;
+      snap(consume ? ['L6'] : ['L5', 'L6'], `${consume ? `<code>${tok.text}</code> was already taken by next_token()` : `<code class="c-adv">advance_token()</code> consumes <code>${tok.text}</code>`}, then recurse <code>parse_expr(${next})</code> to build its <b>right</b> operand.`);
+
+      const rhs = parseExpr(next);
+      if (failed) return null;
+      const node = { id: nid++, kind: 'bin', op: tok.text, lhs: top().lhs, rhs };
+      top().lhs = node; top().pendingOp = null;
+      snap(['L7'], `rhs = <code>${infix(rhs)}</code>. Build <code>${infix(node)}</code> — the old lhs becomes the <b>left</b> child.`, { newNode: node.id });
+    }
+    const out = top().lhs;
+    snap(['L9'], frames.length === 1
+      ? `Top-level <code>parse_expr(0)</code> returns <code>${infix(out)}</code>.`
+      : `Return <code>${infix(out)}</code> to the caller.`);
+    frames.pop();
+    return out;
+  }
+
+  const ast = parseExpr(0);
+  if (!failed && consume) {
+    const names = [...lost].map(i => `<code>${tokens[i].text}</code>`).join(', ');
+    const onlyBrace = [...lost].every(i => tokens[i].kind === 'eof');
+    failed = true;
+    snap([], onlyBrace
+      ? `⚠️ The tree happens to be right, but <code class="c-next">next_token()</code> swallowed the block's <code>}</code> — parse_block can no longer find it.`
+      : `❌ Returned <code>${infix(ast)}</code> — <b>wrong</b>. <code class="c-next">next_token()</code> swallowed ${names}` +
+        (pos < tokens.length ? `, leaving <code>${tokens.slice(pos).map(t => t.text).join(' ')}</code> unparsed.` : '.'),
+      { error: true, done: true, result: ast });
+  }
+  if (!failed && tokens[pos].kind !== 'eof') {
+    fail([], `The expression ended before <code>${tokText(tokens[pos])}</code>, but the block expects <code>}</code> (or another statement) here → syntax error.`);
+  }
+  if (!failed) {
+    let v, msg;
+    try { v = evaluate(ast); msg = `= <b>${v}</b>`; } catch (e) { msg = `<span class="err">${e.message}</span>`; }
+    snap([], `✅ Done. <code>${labForm(ast)}</code> ${msg}`, { done: true, result: ast });
+  }
+  return { steps, ast: failed ? null : ast };
+}
+
+// Build the "tree so far" by folding call frames from innermost to outermost.
+function compositeTree(step) {
+  if (step.result) return step.result;
+  let cur = null;
+  for (let i = step.frames.length - 1; i >= 0; i--) {
+    const f = step.frames[i];
+    if (f.kind === 'paren') { if (f.val) cur = f.val; continue; }
+    if (f.pendingOp) cur = { kind: 'pending', op: f.pendingOp, lhs: f.lhs, rhs: cur || HOLE };
+    else if (f.lhs) cur = f.lhs;
+    else cur = cur || HOLE;
+  }
+  return cur;
+}
+
+// =====================================================================
+// Tree rendering (x = in-order index, y = depth)
+// =====================================================================
+function treeSVG(root, o = {}) {
+  if (!root) return '';
+  const pos = new Map(); let idx = 0, maxD = 0;
+  (function walk(n, d) {
+    maxD = Math.max(maxD, d);
+    if (n.kind === 'bin' || n.kind === 'pending') { walk(n.lhs, d + 1); pos.set(n, { x: idx++, y: d }); walk(n.rhs, d + 1); }
+    else if (n.kind === 'stmt') { walk(n.child, d + 1); pos.set(n, { x: pos.get(n.child).x, y: d }); }   // sits above its child
+    else pos.set(n, { x: idx++, y: d });
+  })(root, 0);
+  const DX = 44, DY = 60, R = 19, PAD = 8;
+  const px = p => PAD + R + p.x * DX, py = p => PAD + R + p.y * DY;
+  const H = PAD * 2 + R * 2 + maxD * DY;
+  const halfW = n => (n.kind === 'stmt' ? n.label.length * 5 + 10 : R);
+  let minX = Infinity, maxX = -Infinity;
+  for (const [n, p] of pos) { minX = Math.min(minX, px(p) - halfW(n)); maxX = Math.max(maxX, px(p) + halfW(n)); }
+  const W = maxX - minX;
+  let edges = '', nodes = '';
+  for (const [n, p] of pos) {
+    if (n.kind === 'bin' || n.kind === 'pending') {
+      for (const c of [n.lhs, n.rhs]) {
+        const q = pos.get(c);
+        const dash = n.kind === 'pending' && c === n.rhs;
+        edges += `<line x1="${px(p)}" y1="${py(p)}" x2="${px(q)}" y2="${py(q)}" class="${dash ? 'dash' : ''}"/>`;
+      }
+    }
+    if (n.kind === 'stmt') {
+      const q = pos.get(n.child), x = px(p), y = py(p), w = halfW(n);
+      edges += `<line x1="${x}" y1="${y}" x2="${px(q)}" y2="${py(q)}"/>`;
+      const cls = ['stmt', o.visited && o.visited.has(n.id) ? 'visited' : '', o.current === n.id ? 'cur' : ''].join(' ');
+      nodes += `<g class="${cls}"><rect x="${x - w}" y="${y - R + 2}" width="${2 * w}" height="${2 * R - 4}" rx="8"/><text x="${x}" y="${y}">${n.label}</text>`;
+      if (o.order && o.order.has(n.id)) nodes += `<text class="badge" x="${x + w + 6}" y="${y - R + 2}">${o.order.get(n.id)}</text>`;
+      nodes += '</g>';
+      continue;
+    }
+    const x = px(p), y = py(p);
+    if (n.kind === 'hole') {
+      nodes += `<g class="hole"><rect x="${x - R + 2}" y="${y - R + 2}" width="${2 * R - 4}" height="${2 * R - 4}" rx="6"/><text x="${x}" y="${y}">?</text></g>`;
+      continue;
+    }
+    const cls = [n.kind === 'int' ? 'int' : 'op', n.kind === 'pending' ? 'pending' : '',
+      o.highlight != null && o.highlight === n.id ? 'hl' : '', o.visited && o.visited.has(n.id) ? 'visited' : '',
+      o.current != null && o.current === n.id ? 'cur' : ''].join(' ');
+    const label = n.kind === 'int' ? n.val : n.op;
+    const fs = String(label).length > 2 ? ' style="font-size:13px"' : '';
+    nodes += `<g class="${cls}"><circle cx="${x}" cy="${y}" r="${R}"/><text x="${x}" y="${y}"${fs}>${label}</text>`;
+    if (o.order && o.order.has(n.id)) nodes += `<text class="badge" x="${x + R + 6}" y="${y - R + 2}">${o.order.get(n.id)}</text>`;
+    nodes += '</g>';
+  }
+  const maxW = (o.scale || 1.7) * W * 1.3 * ZOOM.z;
+  return `<svg class="tree" viewBox="${minX - 4} -4 ${W + 22} ${H + 8}" style="max-width:${maxW}px">${edges}${nodes}</svg>`;
+}
+
+// =====================================================================
+// Parser stepper
+// =====================================================================
+const PSEUDO = [
+  ['L1', 'parse_expr(min_prec):'],
+  ['L2', '    lhs = parse_primary()'],
+  ['L3', '    tok = peek_token()'],
+  ['L4', '    while is_binop(tok) && prec(tok) > min_prec:'],
+  ['L5', '        advance_token()'],
+  ['L6', '        rhs = parse_expr(prec(tok))'],
+  ['L7', '        lhs = make_binary_node(lhs, tok, rhs)'],
+  ['L8', '        tok = peek_token()'],
+  ['L9', '    return lhs'],
+  ['', ''],
+  ['P1', 'parse_primary():'],
+  ['P2', '    if peek is NUMBER: consume, return INTEGER'],
+  ['P4', '    if peek is "(": consume'],
+  ['P5', '        e = parse_expr(0)    // fresh start'],
+  ['P6', '        expect(")")'],
+  ['P7', '        return e'],
+];
+const P = { expr: '1 + 2 - 3 * 4 / 5 % 6', consume: false, predict: false, raw: [], steps: [], i: 0, tokens: [], error: '' };
+
+function pBuild(keepRaw) {
+  const prevRaw = P.steps[P.i] ? P.steps[P.i].raw : 0;
+  const lx = lex(P.expr);
+  P.error = lx.error || ''; P.tokens = lx.tokens || [];
+  P.raw = lx.error ? [] : traceParse(lx.tokens, { consume: P.consume }).steps.map((s, k) => ({ ...s, raw: k }));
+  P.steps = [];
+  for (const s of P.raw) {
+    if (P.predict && s.question) P.steps.push({ ...s, hidden: true });
+    P.steps.push(s);
+  }
+  P.i = 0;
+  if (keepRaw) { const k = P.steps.findIndex(s => s.raw === prevRaw); P.i = k < 0 ? 0 : k; }
+  pRender();
+}
+
+function pRender() {
+  const $ = id => document.getElementById(id);
+  $('pInput').value = P.expr;
+  syncSelect('pSelect', P.expr);
+  const s = P.steps[P.i];
+  if (!s) {
+    $('pTokens').innerHTML = ''; $('pCode').innerHTML = ''; $('pFrames').innerHTML = ''; $('pTree').innerHTML = '';
+    $('pResult').textContent = ''; $('pCount').textContent = '';
+    $('pNarr').className = 'narr e'; $('pNarr').innerHTML = P.error;
+    return;
+  }
+  $('pCount').textContent = `step ${P.i + 1} / ${P.steps.length}`;
+
+  // tokens: dim the consumed ones, ring the one being peeked
+  $('pTokens').innerHTML = P.tokens.map((t, k) => {
+    const cls = ['tok', t.kind === 'op' ? 'op' : t.kind === 'num' ? 'n' : '', k < s.pos ? 'used' : '', s.lost.has(k) ? 'lost' : '', k === s.pos && !s.done && !P.consume ? 'peek' : ''].join(' ');
+    const p = t.kind === 'op' ? `<span class="p">p=${PREC[t.text]}</span>` : '';
+    return `<span class="${cls}">${tokText(t)}${p}</span>`;
+  }).join('');
+
+  // code with highlighted lines (L3/L8 switch to next_token() in lecture mode)
+  $('pCode').innerHTML = PSEUDO.map(([id, txt]) => {
+    let t = txt;
+    if (P.consume && (id === 'L3' || id === 'L8')) t = t.replace('peek_token()', 'next_token()   // consumes!');
+    if (P.consume && id === 'L5') t = '';
+    const on = s.lines.includes(id) ? ' on' : '';
+    const html = esc(t).replace('next_token()', '<span class="c-next">next_token()</span>')
+      .replace('peek_token()', '<span class="c-peek">peek_token()</span>')
+      .replace('advance_token()', '<span class="c-adv">advance_token()</span>');
+    return `<span class="ln${on}">${html || ' '}</span>`;
+  }).join('');
+
+  const onLine = $('pCode').querySelector('.ln.on:last-of-type, .ln.on');
+  if (onLine) onLine.scrollIntoView({ block: 'nearest' });
+
+  // call stack (rendered bottom-up via column-reverse)
+  $('pFrames').innerHTML = s.frames.map((f, k) => {
+    const top = k === s.frames.length - 1 ? ' top' : '';
+    if (f.kind === 'paren') return `<div class="frame paren${top}"><div class="hd">parse_primary()  ( … )</div>` +
+      `<div class="row">inside parentheses${f.val ? `, got <span>${infix(f.val)}</span>` : ''}</div></div>`;
+    const tokRow = f.tok && !(s.hidden && top) ? `<div class="row">tok: <span>${tokText(f.tok)}</span> (prec ${prec(f.tok)})</div>` : '';
+    return `<div class="frame${top}"><div class="hd">parse_expr(min_prec = ${f.min})</div>` +
+      `<div class="row">lhs: <span>${f.lhs ? infix(f.lhs) : '—'}</span></div>${tokRow}` +
+      (f.pendingOp ? `<div class="wait">⏳ waiting for rhs of '${f.pendingOp}'</div>` : '') + '</div>';
+  }).join('') || '<div class="muted" style="font-size:0.8em">(empty — parsing finished)</div>';
+
+  const tree = compositeTree(s);
+  $('pTree').innerHTML = treeSVG(tree, { highlight: s.newNode });
+  $('pResult').textContent = s.done ? labForm(s.result) : '';
+
+  const narr = $('pNarr');
+  narr.className = 'narr' + (s.hidden ? ' q' : s.error ? ' e' : s.done ? ' d' : '');
+  narr.innerHTML = s.hidden ? `🤔 <b>Predict:</b> ${s.question}` : s.msg;
+}
+
+function pStep(d) {
+  const n = P.i + d;
+  if (n < 0 || n >= P.steps.length) return false;
+  P.i = n; pRender(); return true;
+}
+
+// =====================================================================
+// Codegen stepper: post-order → SM → asm, with a simulated stack
+// =====================================================================
+const SM_OF = { '+': 'ADD', '-': 'SUB', '*': 'MUL', '/': 'DIV', '%': 'MOD' };
+const ASM_OF = {
+  '+': ['    ; ADD', '    pop rcx', '    pop rax', '    add rax, rcx', '    push rax'],
+  '-': ['    ; SUB', '    pop rcx', '    pop rax', '    sub rax, rcx', '    push rax'],
+  '*': ['    ; MUL', '    pop rcx', '    pop rax', '    imul rcx   ; rax = rax * rcx', '    push rax'],
+  '/': ['    ; DIV', '    pop rcx', '    pop rax', '    cqo        ; sign-extend rax into rdx', '    idiv rcx   ; rax = quotient, rdx = remainder', '    push rax'],
+  '%': ['    ; MOD', '    pop rcx', '    pop rax', '    cqo        ; sign-extend rax into rdx', '    idiv rcx   ; rax = quotient, rdx = remainder', '    push rdx'],
+};
+
+function buildCodegen(ast) {
+  const ev = [], stack = [], visited = new Set(), order = new Map();
+  let regs = { rax: '—', rcx: '—', rdx: '—' };
+  let stop = false;
+  const add = (e) => ev.push({ stack: stack.slice(), regs: { ...regs }, visited: new Set(visited), order: new Map(order), ...e });
+
+  add({ kind: 'fn', cur: 'fn', asm: ['main:'], smText: 'FN main', changed: [],
+        note: 'Enter the <code>FN main</code> node → emit <code>FN main</code>, which is just the label <code>main:</code>. <code>call main</code> already pushed the return address — right now it is the only thing on the stack.' });
+
+  (function post(n) {
+    if (stop) return;
+    if (n.kind === 'bin') { post(n.lhs); post(n.rhs); if (stop) return; }
+    visited.add(n.id); order.set(n.id, order.size + 1);
+    if (n.kind === 'int') {
+      stack.push(n.val);
+      add({ kind: 'push', cur: n.id, smText: `PUSH ${n.val}`, asm: [`    push ${n.val}   ; PUSH ${n.val}`], pushed: true, changed: [],
+            note: `Visit leaf <code>${n.val}</code> → <code>PUSH ${n.val}</code>.` });
+      return;
+    }
+    const b = stack.pop(), a = stack.pop();
+    let r;
+    try { r = applyOp(n.op, a, b); } catch (e) {
+      stack.push(a, b); stop = true;
+      add({ kind: 'op', cur: n.id, smText: SM_OF[n.op], asm: ASM_OF[n.op], error: true, changed: [], note: `❌ ${e.message}` });
+      return;
+    }
+    regs = { ...regs, rax: n.op === '%' ? Math.trunc(a / b) : r, rcx: b };
+    const changed = ['rax', 'rcx'];
+    let extra = '';
+    if (n.op === '/' || n.op === '%') { regs.rdx = a % b; changed.push('rdx'); }
+    if (n.op === '*') { regs.rdx = r < 0 ? -1 : 0; changed.push('rdx'); extra = ' (One-operand <code>imul rcx</code> also writes the high half of the product into <code>rdx</code>.)'; }
+    stack.push(r);
+    add({ kind: 'op', cur: n.id, smText: SM_OF[n.op], asm: ASM_OF[n.op], pushed: true, changed,
+          note: `Visit <code>${n.op}</code> — both children are done, so <code>${a}</code> and <code>${b}</code> are already on the stack. ` +
+                `<code>pop rcx</code> ← ${b} (right, on top), <code>pop rax</code> ← ${a} (left). ${a} ${n.op} ${b} = <b>${r}</b>, push it.${extra}` });
+  })(ast);
+
+  if (!stop) {
+    const v = stack.pop();
+    regs = { ...regs, rax: v };
+    visited.add('ret'); order.set('ret', order.size + 1);
+    add({ kind: 'ret', cur: 'ret', smText: 'RETURN', asm: ['    ; RETURN', '    pop rax', '    ret'], torn: true, changed: ['rax'],
+          note: `Visit the <code>RETURN</code> node — its child (the expression) is done, so the result is on the stack. Pop it  (<b>${v}</b>) into <code>rax</code>. Now <code>rsp</code> points at the return address again, so <code>ret</code> works — ` +
+                'only because every expression leaves <b>exactly one</b> value (the stack is balanced).' });
+    visited.add('fn');
+    add({ kind: 'end', cur: 'fn', smText: 'END_FN', asm: ['    ; END_FN — nothing to emit'], torn: true, changed: [],
+          note: 'Leave the <code>FN main</code> node → <code>END_FN</code>. It emits no assembly — it only marks where the function ends in the IR (handy once there are several functions).' });
+    const code = exitCode(v);
+    add({ kind: 'exit', smText: null, asm: ['', '; back in _start, after call main:', '    mov rdi, rax', '    mov rax, 60', '    syscall'], torn: true, changed: [], done: true,
+          note: `✅ <code>_start</code> exits with rdi = ${v}. <code>echo $?</code> prints <b>${code}</b>` +
+                (code !== v ? ` — only the low 8 bits survive (${v} mod 256).` : '.') });
+  }
+  return ev;
+}
+
+// Lay out the asm the way the assignment shows it: pushes grouped, a blank line before each op block.
+function asmListing(ev) {
+  const out = ['global _start', '', '_start:', '    call main', '    mov rdi, rax', '    mov rax, 60', '    syscall', ''];
+  let prev = null;
+  for (const e of ev) {
+    if (e.kind === 'fn') out.push(...e.asm);
+    else if (e.kind === 'push') { if (prev !== 'push' && prev !== 'fn') out.push(''); out.push(...e.asm); }
+    else if (e.kind === 'op' || e.kind === 'ret') { out.push('', ...e.asm); }
+    else continue;
+    prev = e.kind;
+  }
+  return out.join('\n');
+}
+
+const G = { expr: '2 + 3 * 4 - 5', ev: [], i: 0, ast: null, tree: null, error: '' };
+
+function gBuild() {
+  const lx = lex(G.expr);
+  G.error = ''; G.ev = []; G.i = 0; G.ast = null;
+  if (lx.error) { G.error = lx.error; return gRender(); }
+  const t = traceParse(lx.tokens);
+  if (!t.ast) { G.error = 'Parse error: ' + t.steps[t.steps.length - 1].msg.replace(/<[^>]+>/g, ''); return gRender(); }
+  G.ast = t.ast; G.ev = buildCodegen(t.ast);
+  G.tree = { kind: 'stmt', id: 'fn', label: 'FN main', child: { kind: 'stmt', id: 'ret', label: 'RETURN', child: t.ast } };
+  gRender();
+}
+
+function gRender() {
+  const $ = id => document.getElementById(id);
+  $('gInput').value = G.expr; syncSelect('gSelect', G.expr);
+  const e = G.ev[G.i];
+  if (!e) { ['gTree', 'gSm', 'gAsm', 'gStack', 'gRegs'].forEach(k => $(k).innerHTML = ''); $('gCount').textContent = '';
+            $('gNarr').className = 'narr e'; $('gNarr').innerHTML = esc(G.error); return; }
+  $('gCount').textContent = `step ${G.i + 1} / ${G.ev.length}`;
+  $('gTree').innerHTML = treeSVG(G.tree, { visited: e.visited, current: e.cur, order: e.order, scale: 1.5 });
+
+  const smLines = G.ev.slice(0, G.i + 1).filter(x => x.smText).map(x => x.smText);
+  $('gSm').innerHTML = smLines.map((t, k) => `<div class="${k === smLines.length - 1 && e.smText ? 'on' : ''}">${esc(t)}</div>`).join('');
+
+  let asmHtml = '';
+  G.ev.slice(0, G.i + 1).forEach((x, k) => {
+    const cls = k === G.i ? 'on' : 'old';
+    x.asm.forEach(l => { asmHtml += `<div class="${cls}">${esc(l) || ' '}</div>`; });
+  });
+  $('gAsm').innerHTML = asmHtml;
+  const cur = $('gAsm').querySelector('.on:last-child') || $('gAsm').lastElementChild;
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+
+  let st;
+  if (e.torn) st = '<div class="cell sys"><span class="muted">return addr — popped by ret</span></div>';
+  else {
+    st = `<div class="cell sys"><span>return addr</span>${e.stack.length ? '' : '<span class="ptr">← rsp</span>'}</div>`;
+    e.stack.forEach((v, k) => {
+      const last = k === e.stack.length - 1;
+      st += `<div class="cell val${last && e.pushed ? ' new' : ''}"><span>${v}</span>${last ? '<span class="ptr">← rsp</span>' : ''}</div>`;
+    });
+  }
+  $('gStack').innerHTML = st;
+  $('gRegs').innerHTML = ['rax', 'rcx', 'rdx'].map(r =>
+    `<span class="r">${r}</span><span class="${e.changed.includes(r) ? 'chg' : ''}">${e.regs[r]}</span>`).join('');
+
+  $('gNarr').className = 'narr' + (e.error ? ' e' : e.done ? ' d' : '');
+  $('gNarr').innerHTML = e.note;
+}
+
+function gStep(d) {
+  const n = G.i + d;
+  if (n < 0 || n >= G.ev.length) return false;
+  G.i = n; gRender(); return true;
+}
+
+// =====================================================================
+// Pipeline slide
+// =====================================================================
+const TOK_NAME = { '+': 'TOKEN_PLUS', '-': 'TOKEN_MINUS', '*': 'TOKEN_STAR', '/': 'TOKEN_SLASH', '%': 'TOKEN_PERCENT', '(': 'TOKEN_LPAREN', ')': 'TOKEN_RPAREN' };
+function astText(n, pre = '', last = true, root = true) {
+  const head = root ? '' : pre + (last ? '└─ ' : '├─ ');
+  const kids = n.kind === 'bin' ? [n.lhs, n.rhs] : [];
+  const label = n.kind === 'int' ? `INTEGER(${n.val})` : `BINOP(${n.op})`;
+  const childPre = root ? pre : pre + (last ? '   ' : '│  ');
+  return head + label + '\n' + kids.map((k, i) => astText(k, childPre, i === kids.length - 1, false)).join('');
+}
+function renderPipeline() {
+  const src = document.getElementById('pipeExpr').value;
+  const $ = id => document.getElementById(id);
+  const lx = lex(src);
+  const t = lx.error ? null : traceParse(lx.tokens);
+  if (!t || !t.ast) {
+    $('pipeErr').textContent = lx.error || 'Parse error: ' + t.steps[t.steps.length - 1].msg.replace(/<[^>]+>/g, '');
+    return;
+  }
+  $('pipeErr').textContent = '';
+  const toks = ['TOKEN_KEYWORD(fn)', 'TOKEN_IDENT(main)', 'TOKEN_LPAREN', 'TOKEN_RPAREN', 'TOKEN_ARROW', 'TOKEN_TYPE(int)',
+    'TOKEN_LBRACE', 'TOKEN_KEYWORD(return)',
+    ...lx.tokens.filter(x => x.kind !== 'eof').map(x => x.kind === 'num' ? `TOKEN_INTEGER(${x.val})` : TOK_NAME[x.text]),
+    'TOKEN_RBRACE', 'TOKEN_EOF'];
+  $('pipeTok').textContent = toks.join('\n');
+  const body = astText(t.ast).trimEnd().split('\n').map((l, i) => '      ' + (i === 0 ? '└─ ' : '   ') + l).join('\n');
+  $('pipeAst').textContent = 'PROGRAM\n└─ FN main -> int\n   └─ RETURN\n' + body;
+  const ev = buildCodegen(t.ast);
+  $('pipeSm').textContent = ev.filter(e => e.smText).map(e => e.smText).join('\n');
+  $('pipeAsm').textContent = asmListing(ev);
+}
+
+// =====================================================================
+// Practice slide
+// =====================================================================
+const PRACTICE = ['9 - 4 - 1', '1 + 2 * 3 - 4', '8 / 4 / 2', '(1 + 2) * (3 + 4)', '2 * (3 + 4) * 5', '100 - 2 * (3 + 4) % 5'];
+function renderErrors() {
+  document.getElementById('errors').innerHTML = BAD.map(([name, e]) => {
+    const t = traceParse(lex(e).tokens);
+    const msg = t.steps[t.steps.length - 1].msg;
+    return `<div class="pcard"><pre style="font-size:0.8em">fn ${name}() -&gt; int\n{\n    return ${esc(e)}\n}</pre>
+      <div class="btns"><button onclick="this.closest('.pcard').classList.toggle('show')">Reveal</button>
+      <button onclick="openInParser('${e}')">Parse it ▶</button></div>
+      <div class="ans" style="font-size:0.85em">${msg}</div></div>`;
+  }).join('');
+}
+// ---- next_token() → peek + advance flip ----
+const FLIP = { lab: false, last: false };
+function flipRender() {
+  const lab = FLIP.lab, anim = lab && !FLIP.last ? ' flip-new' : '';
+  const next = `<span class="c-next${lab ? '' : ' click-me'}">next_token()</span>`;
+  const peek = (note) => `<span class="c-peek${anim}">peek_token()</span>${note}`;
+  const A = lab ? peek('          <span class="c-note">// look only</span>') : next;
+  const B = lab ? peek('      <span class="c-note">// look only</span>') : next;
+  const mid = lab ? `<span class="add${anim}">        <span class="c-adv">advance_token()</span>        <span class="c-note">// it's ours → take it</span></span>\n` : '';
+  document.getElementById('flipCode').innerHTML =
+`parse_expr(min_prec):
+    lhs = parse_primary()
+    tok = ${A}
+    <span class="kw">while</span> is_binop(tok) &amp;&amp; precedence(tok) &gt; min_prec:
+${mid}        rhs = parse_expr(precedence(tok))
+        lhs = make_binary_node(lhs, tok, rhs)
+        tok = ${B}
+    <span class="kw">return</span> lhs`;
+  document.getElementById('flipTitle').textContent = lab ? 'Lab implementation' : 'Lecture';
+  FLIP.last = lab;
+}
+function flipTo(lab) { FLIP.lab = !!lab; flipRender(); }
+function flipStep(d) {
+  if ((d > 0) === FLIP.lab) return false;   // already at that end → let the slide move
+  flipTo(d > 0); return true;
+}
+document.getElementById('flipCode').addEventListener('click', () => flipTo(!FLIP.lab));
+
+function renderPractice() {
+  document.getElementById('practice').innerHTML = PRACTICE.map((p, k) => {
+    const t = traceParse(lex(p).tokens);
+    const v = evaluate(t.ast);
+    return `<div class="pcard" id="pc${k}"><div class="ex">${esc(p)}</div>
+      <div class="btns"><button onclick="this.closest('.pcard').classList.toggle('show')">Reveal</button>
+      <button onclick="openInParser('${p}')">Parse it ▶</button><button onclick="openInGen('${p}')">Codegen ▶</button></div>
+      <div class="ans">${treeSVG(t.ast, { scale: 1.1 })}<div class="result-line">${esc(labForm(t.ast))}<br>value = ${v}, echo $? → ${exitCode(v)}</div></div></div>`;
+  }).join('');
+}
+
+// =====================================================================
+// Slide navigation & wiring
+// =====================================================================
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const slides = [...document.querySelectorAll('.slide')];
+let cur = 0;
+
+function go(n) {
+  cur = Math.max(0, Math.min(slides.length - 1, n));
+  slides.forEach((s, k) => s.classList.toggle('active', k === cur));
+  document.getElementById('slideNum').textContent = `${cur + 1} / ${slides.length}`;
+  document.getElementById('slideTitle').textContent = slides[cur].dataset.title;
+  document.getElementById('progress').style.width = `${(cur + 1) / slides.length * 100}%`;
+  history.replaceState(null, '', '#' + (cur + 1));
+}
+function slideIndex(stepper) { return slides.findIndex(s => s.dataset.stepper === stepper); }
+
+function openInParser(expr, opts = {}) {
+  P.expr = expr.trim();
+  P.consume = !!opts.consume;
+  document.getElementById('pConsume').checked = P.consume;
+  pBuild(); go(slideIndex('parse'));
+}
+function openInGen(expr) { G.expr = expr.trim(); gBuild(); go(slideIndex('gen')); }
+
+function fillSelect(id) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = EXAMPLES.map(e => `<option value="${e}">${e}</option>`).join('') +
+    '<option value="__custom">✎ Custom — type your own…</option>';
+}
+function syncSelect(id, expr) {
+  const sel = document.getElementById(id);
+  sel.value = EXAMPLES.includes(expr) ? expr : '__custom';
+}
+
+function stepActive(d) {
+  const st = slides[cur].dataset.stepper;
+  if (st === 'parse') return pStep(d);
+  if (st === 'gen') return gStep(d);
+  if (st === 'flip') return flipStep(d);
+  return false;
+}
+function jumpActive(end) {
+  const st = slides[cur].dataset.stepper;
+  if (st === 'parse') { P.i = end ? P.steps.length - 1 : 0; pRender(); }
+  if (st === 'gen') { G.i = end ? G.ev.length - 1 : 0; gRender(); }
+  if (st === 'flip') flipTo(end);
+}
+
+document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
+  const a = b.dataset.act;
+  if (a === 'next') stepActive(1); else if (a === 'prev') stepActive(-1);
+  else jumpActive(a === 'last');
+}));
+
+// Picking an example loads it; picking "Custom" jumps to the text box (Enter loads what you type).
+function onExampleSelect(e, inputId, load) {
+  if (e.target.value === '__custom') {
+    const box = document.getElementById(inputId);
+    box.value = ''; box.focus();
+    return;
+  }
+  load(e.target.value); e.target.blur();
+}
+document.getElementById('pSelect').addEventListener('change', e => onExampleSelect(e, 'pInput', v => { P.expr = v; pBuild(); }));
+document.getElementById('gSelect').addEventListener('change', e => onExampleSelect(e, 'gInput', v => { G.expr = v; gBuild(); }));
+document.getElementById('pPredict').addEventListener('change', e => { P.predict = e.target.checked; pBuild(true); });
+document.getElementById('pConsume').addEventListener('change', e => { P.consume = e.target.checked; pBuild(); });
+document.getElementById('pipeExpr').addEventListener('input', renderPipeline);
+
+const ENTER = {
+  parse: el => { P.expr = el.value.trim(); pBuild(); },
+  gen: el => { G.expr = el.value.trim(); gBuild(); },
+};
+document.querySelectorAll('input[data-enter]').forEach(el => el.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { (ENTER[el.dataset.enter] || (() => {}))(el); el.blur(); }
+  if (e.key === 'Escape') el.blur();
+}));
+
+// ---- live font zoom: + / - / 0 ----
+const ZOOM = { z: 1 };
+function setZoom(z) {
+  ZOOM.z = Math.round(Math.max(0.6, Math.min(2, z)) * 10) / 10;
+  document.documentElement.style.setProperty('--zoom', ZOOM.z);
+  try { localStorage.setItem('lab7-zoom', ZOOM.z); } catch (e) {}
+  pRender(); gRender(); renderPractice();
+}
+
+function toggleTheme() {
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light';
+  try { localStorage.setItem('lab7-theme', r.dataset.theme); } catch (e) {}
+}
+document.getElementById('themeBtn').onclick = toggleTheme;
+document.getElementById('helpBtn').onclick = () => document.getElementById('help').classList.toggle('show');
+document.getElementById('prevSlide').onclick = () => go(cur - 1);
+document.getElementById('nextSlide').onclick = () => go(cur + 1);
+
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input[type=text], select')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  let handled = true;
+  switch (e.key) {
+    case 'ArrowRight': case ' ': if (!stepActive(1)) go(cur + 1); break;
+    case 'ArrowLeft': if (!stepActive(-1)) go(cur - 1); break;
+    case 'PageDown': case ']': case 'ArrowDown': go(cur + 1); break;
+    case 'PageUp': case '[': case 'ArrowUp': go(cur - 1); break;
+    case 'Home': jumpActive(false); break;
+    case 'End': jumpActive(true); break;
+    case 'p': case 'P': { const c = document.getElementById('pPredict'); c.checked = !c.checked; P.predict = c.checked; pBuild(true); break; }
+    case 't': case 'T': toggleTheme(); break;
+    case 'f': case 'F': document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); break;
+    case '+': case '=': setZoom(ZOOM.z + 0.1); break;
+    case '-': case '_': setZoom(ZOOM.z - 0.1); break;
+    case '0': setZoom(1); break;
+    case '?': document.getElementById('help').classList.toggle('show'); break;
+    default: handled = false;
+  }
+  if (handled) e.preventDefault();
+});
+
+// ---- init ----
+try { const t = localStorage.getItem('lab7-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+try { const z = parseFloat(localStorage.getItem('lab7-zoom')); if (z) { ZOOM.z = z; document.documentElement.style.setProperty('--zoom', z); } } catch (e) {}
+fillSelect('pSelect'); fillSelect('gSelect');
+pBuild(); gBuild(); renderPipeline(); renderPractice(); renderErrors(); flipRender();
+go((parseInt(location.hash.slice(1), 10) || 1) - 1);
+</script>
+</body>
+</html>

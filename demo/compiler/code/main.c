@@ -108,8 +108,30 @@ int main(int arg_count, const char **args)
 		printf("ERROR: Could not open %s for writing.\n", options.out_file_name);
 		return 1; // Exit with error
 	}
+
+	//
+	// Step 4 of compilation: Stack Machine Instructions Generation
+	//
 	
-	generate_asm(parse_result.ast, out_file);
+	SM_Program sm_program = generate_sm(parse_result.ast);
+	if (sm_program.count == 0)
+	{
+		printf("ERROR: Failed to generate stack machine instructions.\n");
+		return 1; // Exit with error
+	}
+
+	bool test_sm = true;
+	if (test_sm)
+	{
+		printf("Stack Machine output:\n");
+		print_stack_machine_instructions(sm_program);
+	}
+
+	//
+	// Step 5 of compilation: Assembly Code Generation
+	//
+	generate_asm(sm_program, out_file);
+	// generate_asm(parse_result.ast, out_file);
 	
 	fclose(out_file);
 	

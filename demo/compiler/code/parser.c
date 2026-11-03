@@ -7,7 +7,9 @@ typedef enum AST_Kind
 	AST_TYPE,
 	AST_RETURN,
 	AST_INTEGER,
-	// TODO: Add more as needed
+	
+	// Updated
+	AST_BINOP
 } AST_Kind;
 
 const char *ast_kind_as_cstr(AST_Kind kind)
@@ -42,6 +44,14 @@ typedef struct AST_Fn_Data
 	AST_List body;
 } AST_Fn_Data;
 
+// Updated
+typedef struct AST_Binop_Data
+{
+	String op;
+	AST_Node *left;
+	AST_Node *right;
+} AST_Binop_Data;
+
 struct AST_Node
 {
 	AST_Kind kind;
@@ -52,8 +62,9 @@ struct AST_Node
 	{
 		AST_List    program;   // Data for AST_PROGRAM
 		AST_Fn_Data fn;        // Data for AST_FN
-		// Type        type;      // Data for AST_TYPE
 		AST_Node   *ret_expr;  // Data for AST_RETURN
+		// Updated
+		AST_Binop_Data binop; // Data for AST_BINOP
 		long        int_value; // Data for AST_INTEGER
 	};
 };
@@ -64,6 +75,23 @@ typedef struct Parser
 	long tok_index;
 	bool has_error; // Keep track of if we've encountered an error
 } Parser;
+
+// Updated
+int get_precedence(Token *tok)
+{
+	switch (tok->kind)
+	{
+	case TOKEN_PLUS:
+	case TOKEN_MINUS:
+		return 1;
+	case TOKEN_MULTIPLY:
+	case TOKEN_DIVIDE:
+	case TOKEN_MODULO:
+		return 2;
+	default:
+		return -1;
+	}
+}
 
 AST_Node *make_ast_node(AST_Kind kind)
 {
@@ -128,6 +156,92 @@ Token *expect_keyword(Parser *parser, Keyword expected_keyword)
 void ast_list_append(AST_List *list, AST_Node *node)
 {
 	// TODO: Implement appending to a doubly-linked list
+}
+
+// Updated
+// primitive = number | "(" , expr , ")"
+AST_Node *parse_primary(Parser *parser)
+{
+    Token *tok = peek_token(parser, 0);
+
+    if (tok->kind == TOKEN_INTEGER)
+    {
+        ++parser->tok_index; // consume the number
+        AST_Node *node = make_ast_node(AST_INTEGER);
+        node->int_value = tok->long_value;
+        return node;
+    }
+    else if (tok->kind == '(')
+    {
+        ++parser->tok_index; // consume '('
+        AST_Node *expr = parse_expr(parser, 0); // fresh start inside
+        if (parser->has_error) return expr;
+        expect_token(parser, ')'); // consume ')'
+        return expr;
+    }
+    else
+    {
+        report_error(parser, tok,
+            "Expected a number or '('\n");
+        return make_ast_node(AST_NONE);
+    }
+}
+
+// Updated
+// expr = primitive { binop primitive }
+// uses Pratt parsing for correct precedence and left-associativity
+AST_Node *parse_expr(Parser *parser, int min_prec)
+{
+    AST_Node *lhs = parse_primary(parser);
+    if (parser->has_error) return lhs;
+
+    while (true)
+    {
+        Token *tok = peek_token(parser, 0); // peek at next operator
+        int prec = get_precedence(tok);
+
+        // stop if:
+        // - not a binary operator (prec == -1)
+        // - precedence not high enough
+        // left-associativity: use <= so equal precedence stops too
+        if (prec <= min_prec) break;
+
+        ++parser->tok_index; // now consume the operator
+
+        // recurse for right side with current precedence as new floor
+        AST_Node *rhs = parse_expr(parser, prec);
+        if (parser->has_error) return lhs;
+
+        // build the binary operation node
+        AST_Node *node = make_ast_node(AST_BINOP);
+        node->binop.op  = tok->kind;
+        node->binop.lhs = lhs;
+        node->binop.rhs = rhs;
+        lhs = node; // this becomes left child next iteration
+    }
+
+    return lhs;
+}
+
+// Updated
+AST_Node *parse_return(Parser *parser)
+{
+    expect_keyword(parser, KEYWORD_RETURN);
+    if (parser->has_error) return make_ast_node(AST_NONE);
+
+    AST_Node *node = make_ast_node(AST_RETURN);
+    node->ret_expr = NULL;
+
+    // is there an expression after return?
+    // if next token is } or EOF, there is no expression
+    Token *next = peek_token(parser, 0);
+    if (next->kind != '}' && next->kind != TOKEN_EOF)
+    {
+        node->ret_expr = parse_expr(parser, 0);
+        if (parser->has_error) return node;
+    }
+
+    return node;
 }
 
 AST_List parse_block(Parser *parser)
